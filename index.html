@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gem Miner - Persistent World</title>
+    <style>
+        canvas { 
+            background: #000; display: block; margin: 0 auto; border: 4px solid #444; 
+            cursor: crosshair; max-width: 100%; height: auto; 
+        }
+        body { 
+            background: #111; color: white; font-family: sans-serif; text-align: center; 
+            margin: 0; padding: 10px; touch-action: manipulation;
+        }
+        .toolbar { 
+            background: #222; padding: 10px; margin-bottom: 10px; border-radius: 8px; 
+            border: 1px solid #444; display: flex; justify-content: center; flex-wrap: wrap; gap: 5px;
+        }
+        .tool-btn { 
+            padding: 10px 20px; font-weight: bold; cursor: pointer; border: 2px solid transparent; 
+            border-radius: 4px; margin: 0 5px; background: #333; color: white;
+        }
+        .active-tool { border-color: #f1c40f; background: #444; color: #f1c40f; }
+        .stats { margin: 10px 0; font-size: 1.1rem; font-weight: bold; }
+        button.action { 
+            background: #27ae60; color: white; border: none; padding: 12px 15px; 
+            border-radius: 4px; cursor: pointer; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Deep Miner: Level <span id="lvlDisplay">1</span></h1>
+    
+    <div class="toolbar">
+        <button id="mineTool" class="tool-btn active-tool" onclick="setTool('mine')">⛏️ MINE / CLIMB</button>
+        <button id="ladderTool" class="tool-btn" onclick="setTool('ladder')">🪜 LADDER (<span id="matDisplay">5</span>)</button>
+    </div>
+
+    <div class="stats">
+        Gold: $<span id="goldDisplay">0</span> | Cargo: <span id="cargoDisplay">0</span>/<span id="maxDisplay">10</span>
+    </div>
+    
+    <canvas id="gameCanvas" width="400" height="500"></canvas>
+    
+    <div class="toolbar">
+        <button class="action" onclick="buyUpgrade('cargo')">Cargo +5 ($100)</button>
+        <button class="action" onclick="buyUpgrade('drill')">Drill +1 ($150)</button>
+        <button class="action" onclick="buyUpgrade('ladders')">Buy 5 Ladders ($50)</button>
+    </div>
+
+<script>
+// --- CONFIG ---
+const TILE_SIZE = 40;
+const COLS = 10;
+const ROWS = 60; 
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- STATE ---
+let player = JSON.parse(localStorage.getItem('miner_ladder_v2')) || {
+    x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, level: 1, drillPower: 1, ladders: 5
+};
+let world = [];
+let currentTool = 'mine';
+let target = null;
+
+// --- PERSISTENCE ---
+function save() {
+    localStorage.setItem('miner_ladder_v2', JSON.stringify(player));
+    localStorage.setItem('miner_world_data', JSON.stringify(world));
+}
+
+function initLevel() {
+    const savedWorld = localStorage.getItem('miner_world_data');
+    if (savedWorld) {
+        world = JSON.parse(savedWorld);
+    } else {
+        world = [];
+        for (let y = 0; y < ROWS; y++) {
+            world[y] = [];
+            for (let x = 0; x < COLS; x++) {
+                let type = (y === 0) ? 'air' : (Math.random() < 0.1 ? 'gem' : (y === ROWS-1 ? 'bedrock' : 'dirt'));
+                world[y][x] = { type, mined: (type === 'air'), hasLadder: false, hp: (type === 'gem' ? 3 : 1) };
+            }
+        }
+        save();
+    }
+    updateUI();
+}
+
+// --- TOOLS & INPUT ---
+function setTool(tool) {
+    currentTool = tool;
+    document.getElementById('mineTool').className = 'tool-btn' + (tool === 'mine' ? ' active-tool' : '');
+    document.getElementById('ladderTool').className = 'tool-btn' + (tool === 'ladder' ? ' active-tool' : '');
+}
+
+// --- NEW STATE FOR PATHFINDING ---
+// Change 'target' to 'goal' to handle the persistent path
+let goal = null;
+
+function handleInput(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mouseX = (clientX - rect.left) * scaleX;
+    const mouseY = (clientY - rect.top) * scaleY;
+    
+    const offsetY = Math.max(0, (player.y * TILE_SIZE) - canvas.height / 2);
+    const tx = Math.floor(mouseX / TILE_SIZE);
+    const ty = Math.floor((mouseY + offsetY) / TILE_SIZE);
+
+    if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return;
+
+    if (currentTool === 'ladder') {
+        if (world[ty][tx].mined && !world[ty][tx].hasLadder && player.ladders > 0) {
+            world[ty][tx].hasLadder = true;
+            player.ladders--;
+            save(); updateUI();
+        }
+        return;
+    }
+
+    // CLICKING DIRT: Mine it if adjacent, then stop.
+    if (!world[ty][tx].mined) {
+        goal = null; 
+        if (Math.abs(tx - player.x) <= 1 && Math.abs(ty - player.y) <= 1) {
+             if (player.cargo < player.maxCargo) mineBlock(tx, ty);
+             else alert("Cargo full!");
+        }
+    } 
+    // CLICKING OPEN SPACE: Set as pathfinding goal.
+    else {
+        goal = {x: tx, y: ty};
+    }
+}
+
+let blockedMessage = "";
+let blockedTimer = 0;
+
+function move() {
+    if (!goal) return;
+
+    if (player.x === goal.x && player.y === goal.y) {
+        goal = null;
+        return;
+    }
+
+    let dx = Math.sign(goal.x - player.x);
+    let dy = Math.sign(goal.y - player.y);
+    let moved = false;
+
+    // Check availability
+    let canMoveHorizontal = (dx !== 0 && world[player.y][player.x + dx].mined);
+    let canMoveVertical = false;
+    
+    if (dy !== 0) {
+        let ny = player.y + dy;
+        let targetBlock = world[ny][player.x];
+        let currentBlock = world[player.y][player.x];
+        
+        if (dy === -1) { // UP
+            if (targetBlock.mined && currentBlock.hasLadder) canMoveVertical = true;
+        } else { // DOWN
+            if (targetBlock.mined) canMoveVertical = true;
+        }
+    }
+
+    // SMART CHOICE: 
+    // If we want to go up/down and a ladder/path is available, take it.
+    // Otherwise, move horizontally.
+    if (canMoveVertical && (dy !== 0)) {
+        player.y += dy;
+        moved = true;
+    } else if (canMoveHorizontal) {
+        player.x += dx;
+        moved = true;
+    }
+
+    if (!moved) {
+        // Final check: If we are blocked because we need a ladder but aren't on one
+        if (dy === -1 && !world[player.y][player.x].hasLadder) {
+            blockedMessage = "NO LADDER TO CLIMB";
+        } else if (dx !== 0 && !world[player.y][player.x + dx].mined) {
+            blockedMessage = "PATH BLOCKED BY DIRT";
+        } else {
+            blockedMessage = "PATH BLOCKED";
+        }
+        goal = null;
+        blockedTimer = 90;
+    }
+
+    // Auto-sell
+    if (player.y === 0 && player.cargo > 0) {
+        player.gold += (player.cargo * 10);
+        player.cargo = 0;
+        save();
+        updateUI();
+    }
+}
+
+function applyGravity() {
+    if (player.y < ROWS - 1) {
+        let current = world[player.y][player.x];
+        let below = world[player.y + 1][player.x];
+        
+        // NEW PHYSICS: Fall ONLY if current tile NO ladder AND tile below NO ladder AND tile below is mined
+        if (!current.hasLadder && !below.hasLadder && below.mined) {
+            player.y++;
+        }
+    }
+}
+
+function mineBlock(x, y) {
+    let b = world[y][x];
+    if (b.type === 'bedrock') { nextLevel(); return; }
+    b.hp -= player.drillPower;
+    if (b.hp <= 0) {
+        if (b.type === 'gem') player.gold += 100;
+        b.mined = true; player.cargo++; save(); updateUI();
+    }
+}
+
+// --- RENDERING ---
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let offsetY = Math.max(0, (player.y * TILE_SIZE) - canvas.height / 2);
+
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            let b = world[y][x];
+            let rx = x * TILE_SIZE;
+            let ry = (y * TILE_SIZE) - offsetY;
+            if (ry < -TILE_SIZE || ry > canvas.height) continue;
+
+            if (!b.mined) {
+                let revealed = false;
+                for(let ty=-1; ty<=1; ty++) for(let tx=-1; tx<=1; tx++)
+                    if(world[y+ty]?.[x+tx]?.mined) revealed = true;
+                ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
+                ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
+            }
+            if (b.hasLadder) {
+                ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 4;
+                ctx.strokeRect(rx + 8, ry, TILE_SIZE - 16, TILE_SIZE);
+                for(let i=1; i<4; i++) {
+                    ctx.beginPath(); ctx.moveTo(rx+8, ry+(i*10)); ctx.lineTo(rx+TILE_SIZE-8, ry+(i*10)); ctx.stroke();
+                }
+            }
+        }
+    }
+    ctx.fillStyle = '#f1c40f'; // Player
+    ctx.fillRect(player.x * TILE_SIZE + 5, (player.y * TILE_SIZE) - offsetY + 5, TILE_SIZE - 10, TILE_SIZE - 10);
+    requestAnimationFrame(draw);
+// Draw Blocked Message Overlay
+    if (blockedTimer > 0) {
+        ctx.fillStyle = "rgba(255, 0, 0, 0.7)";
+        ctx.fillRect(50, canvas.height / 2 - 30, 300, 60);
+        ctx.fillStyle = "white";
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillText(blockedMessage, canvas.width / 2 - ctx.measureText(blockedMessage).width / 2, canvas.height / 2 + 5);
+        blockedTimer--;
+    }
+}
+
+// --- LISTENERS ---
+canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', e => { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+
+function buyUpgrade(t) {
+    if (t === 'cargo' && player.gold >= 100) { player.gold -= 100; player.maxCargo += 5; }
+    else if (t === 'drill' && player.gold >= 150) { player.gold -= 150; player.drillPower += 1; }
+    else if (t === 'ladders' && player.gold >= 50) { player.gold -= 50; player.ladders += 5; }
+    save(); updateUI();
+}
+
+function nextLevel() {
+    if (confirm("Next Level?")) { player.level++; player.y = 0; localStorage.removeItem('miner_world_data'); initLevel(); save(); }
+}
+
+function updateUI() {
+    document.getElementById('goldDisplay').innerText = player.gold;
+    document.getElementById('cargoDisplay').innerText = player.cargo;
+    document.getElementById('lvlDisplay').innerText = player.level;
+    document.getElementById('maxDisplay').innerText = player.maxCargo;
+    document.getElementById('matDisplay').innerText = player.ladders;
+}
+
+initLevel();
+setInterval(move, 120);
+setInterval(applyGravity, 300);
+draw();
+</script>
+</body>
+</html>
