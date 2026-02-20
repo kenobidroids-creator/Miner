@@ -122,7 +122,6 @@ function handleInput(clientX, clientY) {
 
     if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return;
 
-    // LADDER TOOL: Place a ladder if tile is mined
     if (currentTool === 'ladder') {
         if (world[ty][tx].mined && !world[ty][tx].hasLadder && player.ladders > 0) {
             world[ty][tx].hasLadder = true;
@@ -132,96 +131,87 @@ function handleInput(clientX, clientY) {
         return;
     }
 
-    // MINE TOOL logic
+    // UPDATED LOGIC:
     if (!world[ty][tx].mined) {
-        // If we are ALREADY next to it, mine it immediately
+        // If adjacent, mine immediately
         if (Math.abs(tx - player.x) <= 1 && Math.abs(ty - player.y) <= 1) {
              if (player.cargo < player.maxCargo) {
                  mineBlock(tx, ty);
-                 goal = null; // Stop moving if we just mined
+                 goal = null; 
              } else {
                  blockedMessage = "CARGO FULL!";
                  blockedTimer = 60;
              }
-        } 
-        // NEW: If we are far away, find the closest empty neighbor to walk to
-        else {
-            goal = {x: tx, y: ty}; 
-            // The pathfinding 'getMoveScore' naturally handles the rest because
-            // it refuses to step ONTO the dirt, so it will stop at the closest valid tile.
+        } else {
+            // Far away dirt: set as goal, pathfinder will stop at the edge
+            goal = {x: tx, y: ty};
             pathHistory = [];
         }
     } else {
-        // Clicking an empty space: just navigate there
         goal = {x: tx, y: ty};
         pathHistory = [];
     }
 }
-
 
 let blockedMessage = "";
 let blockedTimer = 0;
 
 function move() {
     if (!goal) return;
+    if (player.x === goal.x && player.y === goal.y) { goal = null; return; }
 
-    if (player.x === goal.x && player.y === goal.y) {
-        goal = null;
-        return;
-    }
-
-    let dx = Math.sign(goal.x - player.x);
-    let dy = Math.sign(goal.y - player.y);
-    let moved = false;
-
-    // Check availability
-    let canMoveHorizontal = (dx !== 0 && world[player.y][player.x + dx].mined);
-    let canMoveVertical = false;
-    
-    if (dy !== 0) {
-        let ny = player.y + dy;
-        let targetBlock = world[ny][player.x];
-        let currentBlock = world[player.y][player.x];
+    // Scoring system to evaluate best move
+    const getMoveScore = (x, y, isVertical) => {
+        if (x < 0 || x >= COLS || y < 0 || y >= ROWS || !world[y][x].mined) return -1000;
         
-        if (dy === -1) { // UP
-            if (targetBlock.mined && currentBlock.hasLadder) canMoveVertical = true;
-        } else { // DOWN
-            if (targetBlock.mined) canMoveVertical = true;
-        }
-    }
+        // Vertical check: can't go up without ladder
+        if (isVertical && y < player.y && !world[player.y][player.x].hasLadder) return -1000;
 
-    // SMART CHOICE: 
-    // If we want to go up/down and a ladder/path is available, take it.
-    // Otherwise, move horizontally.
-    if (canMoveVertical && (dy !== 0)) {
-        player.y += dy;
-        moved = true;
-    } else if (canMoveHorizontal) {
-        player.x += dx;
-        moved = true;
-    }
+        let score = 0;
+        // Reward getting closer to goal
+        if (Math.abs(goal.x - x) < Math.abs(goal.x - player.x)) score += 10;
+        if (Math.abs(goal.y - y) < Math.abs(goal.y - player.y)) score += 10;
+        
+        // Memory: Penalize tiles we just came from to prevent loops
+        pathHistory.forEach((pos, i) => { 
+            if (pos.x === x && pos.y === y) score -= (20 + i); 
+        });
 
-    if (!moved) {
-        // Final check: If we are blocked because we need a ladder but aren't on one
-        if (dy === -1 && !world[player.y][player.x].hasLadder) {
-            blockedMessage = "NO LADDER TO CLIMB";
-        } else if (dx !== 0 && !world[player.y][player.x + dx].mined) {
-            blockedMessage = "PATH BLOCKED BY DIRT";
-        } else {
+        return score;
+    };
+
+    // Evaluate all 4 adjacent directions
+    let choices = [
+        { x: player.x + 1, y: player.y, s: getMoveScore(player.x + 1, player.y, false) },
+        { x: player.x - 1, y: player.y, s: getMoveScore(player.x - 1, player.y, false) },
+        { x: player.x, y: player.y + 1, s: getMoveScore(player.x, player.y + 1, true) },
+        { x: player.x, y: player.y - 1, s: getMoveScore(player.x, player.y - 1, true) }
+    ].sort((a, b) => b.s - a.s);
+
+    if (choices[0].s > -500) {
+        player.x = choices[0].x;
+        player.y = choices[0].y;
+        
+        pathHistory.push({x: player.x, y: player.y});
+        if (pathHistory.length > 5) pathHistory.shift();
+    } else {
+        // Only show "Blocked" if we aren't standing next to our target
+        const dist = Math.abs(goal.x - player.x) + Math.abs(goal.y - player.y);
+        if (dist > 1) {
             blockedMessage = "PATH BLOCKED";
+            blockedTimer = 60;
         }
         goal = null;
-        blockedTimer = 90;
     }
 
-    // Auto-sell
+    // Auto-sell at surface
     if (player.y === 0 && player.cargo > 0) {
         player.gold += (player.cargo * 10);
         player.cargo = 0;
-        save();
-        updateUI();
+        save(); updateUI();
     }
 }
+
 
 function applyGravity() {
     if (player.y < ROWS - 1) {
