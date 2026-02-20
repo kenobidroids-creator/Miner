@@ -100,7 +100,7 @@ function initLevel() {
             for (let x = 0; x < COLS; x++) {
                 let type = (y === 0) ? 'air' : (Math.random() < 0.1 ? 'gem' : (y === ROWS-1 ? 'bedrock' : 'dirt'));
                 
-                // Calculate HP based on block type and level
+                // IMPORTANT: We must define maxHP here
                 let baseHP = (type === 'gem' ? 3 : 1);
                 let totalHP = baseHP * hpMult;
                 
@@ -108,8 +108,8 @@ function initLevel() {
                     type, 
                     mined: (type === 'air'), 
                     hasLadder: false, 
-                    hp: totalHP,
-                    maxHP: totalHP // Added this so cracks can calculate percentage
+                    hp: totalHP,    // Current health
+                    maxHP: totalHP  // Starting health (for crack % math)
                 };
             }
         }
@@ -185,27 +185,30 @@ function findPath(startX, startY, targetX, targetY) {
         ];
 
         for (let n of neighbors) {
-            let id = `${n.x},${n.y}`;
-            if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
-                let canMove = world[n.y][n.x].mined;
-                // NEW JUMP LOGIC:
-                // You can go UP if:
-                // 1. There is a ladder OR
-                // 2. It's only a 1-block jump and the space above is clear
-                if (n.v && n.y < curr.y) {
-                    const hasLadder = world[curr.y][curr.x].hasLadder;
-                    const isOneBlockJump = (curr.y - n.y === 1);
+    let id = `${n.x},${n.y}`;
+    if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
+        let canMove = world[n.y][n.x].mined;
+
+        // Vertical Movement Rules
+        if (n.v && n.y < curr.y) { // Attempting to go UP
+            const hasLadder = world[curr.y][curr.x].hasLadder;
+            const isOneBlockJump = (curr.y - n.y === 1);
             
-                    if (!hasLadder && !isOneBlockJump) {
-                        canMove = false; // Too high to jump!
+            // If no ladder AND it's more than 1 block, you can't go up.
+            if (!hasLadder && !isOneBlockJump) {
+                canMove = false;
             }
         }
-                if (canMove) {
-                    visited.add(id);
-                    queue.push([...path, n]);
-                }
-            }
+        
+        // Falling Logic: If you move horizontally into air, you must be able to land
+        // (The BFS naturally handles falling, but this keeps paths realistic)
+
+        if (canMove) {
+            visited.add(id);
+            queue.push([...path, n]);
         }
+    }
+}
     }
     return []; // No path found
 }
@@ -256,7 +259,7 @@ function mineBlock(x, y) {
 
     if (player.cargo >= player.maxCargo) {
         blockedMessage = "CARGO FULL!";
-        blockedTimer = 60;
+        blockedTimer = 200;
         return;
     }
 
@@ -301,19 +304,20 @@ function draw() {
                         if(world[y+ty]?.[x+tx]?.mined) revealed = true;
                     }
                 }
-    
+                
+                // 1. Draw the block base
                 ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
                 ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
 
-                // --- CRACKING EFFECT ---
+                // --- CRACKING EFFECT --- On top of block base
                 if (b.hp < b.maxHP) {
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = "white";
+                    ctx.lineWidth = 3;
                     let pct = b.hp / b.maxHP;
         
                     ctx.beginPath();
-                    if (pct < 0.8) { ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); }
-                    if (pct < 0.5) { ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+18, ry+22); }
+                    if (pct < 0.9) { ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); }
+                    if (pct < 0.6) { ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+18, ry+22); }
                     if (pct < 0.3) { ctx.moveTo(rx+5, ry+TILE_SIZE-5); ctx.lineTo(rx+22, ry+12); }
                     ctx.stroke();
                 }
@@ -428,6 +432,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
