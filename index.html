@@ -93,23 +93,23 @@ function initLevel() {
         world = JSON.parse(savedWorld);
     } else {
         world = [];
-        // Scale HP based on level: Level 1 = 1x, Level 2 = 2x, etc.
-        let hpMult = player.level; 
+        let hpMult = player.level || 1; 
 
         for (let y = 0; y < ROWS; y++) {
             world[y] = [];
             for (let x = 0; x < COLS; x++) {
                 let type = (y === 0) ? 'air' : (Math.random() < 0.1 ? 'gem' : (y === ROWS-1 ? 'bedrock' : 'dirt'));
                 
-                // Set Max HP and Current HP
-                let maxHP = (type === 'gem' ? 3 : 1) * hpMult;
+                // Calculate HP based on block type and level
+                let baseHP = (type === 'gem' ? 3 : 1);
+                let totalHP = baseHP * hpMult;
                 
                 world[y][x] = { 
                     type, 
                     mined: (type === 'air'), 
                     hasLadder: false, 
-                    hp: maxHP,
-                    maxHP: maxHP // We need to store maxHP to calculate the crack percentage
+                    hp: totalHP,
+                    maxHP: totalHP // Added this so cracks can calculate percentage
                 };
             }
         }
@@ -245,30 +245,28 @@ function mineBlock(x, y) {
     let b = world[y][x];
     if (b.type === 'bedrock') { nextLevel(); return; }
 
-    // Use drill power to damage the block
+    if (player.cargo >= player.maxCargo) {
+        blockedMessage = "CARGO FULL!";
+        blockedTimer = 60;
+        return;
+    }
+
+    // Apply damage. Use drill power to damage the block
     b.hp -= player.drillPower;
 
     // If block is still alive, just save the damage state (for the cracks)
     if (b.hp > 0) {
-        save();
+        save(); // Save the HP state so cracks persist
         return; 
     }
 
-    // If HP is 0 or less, the block breaks!
-    if (b.hp <= 0) {
-        b.mined = true;
-        player.cargo++; // Every block takes 1 space
-
-        // Only add value if it's a gem!
-        if (b.type === 'gem') {
-            player.cargoValue += 100; // Gems are worth $100
-        } else {
-            player.cargoValue += 5;   // Dirt is only worth $5
-        }
-        
-        save();
-        updateUI();
-    }
+    // Block Breaks
+    b.mined = true;
+    player.cargo++;
+    player.cargoValue = (player.cargoValue || 0) + (b.type === 'gem' ? 100 : 5);
+    
+    save();
+    updateUI();
 }
 
 // --- RENDERING ---
@@ -287,27 +285,36 @@ function draw() {
                 let revealed = false;
                 for(let ty=-1; ty<=1; ty++) for(let tx=-1; tx<=1; tx++)
                     if(world[y+ty]?.[x+tx]?.mined) revealed = true;
+    
                 ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
                 ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
 
-                // --- NEW: CRACKING EFFECT ---
+                // --- CRACKING EFFECT ---
                 if (b.hp < b.maxHP) {
-                    let damagePercent = b.hp / b.maxHP;
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
                     ctx.lineWidth = 2;
-                    
-                    // Draw 3-4 random "crack" lines based on damage
-                    if (damagePercent < 0.8) { // First crack
-                        ctx.beginPath(); ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); ctx.stroke();
-                    }
-                    if (damagePercent < 0.5) { // Second crack
-                        ctx.beginPath(); ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+20, ry+25); ctx.stroke();
-                    }
-                    if (damagePercent < 0.2) { // Final cracks
-                        ctx.beginPath(); ctx.moveTo(rx+10, ry+TILE_SIZE-5); ctx.lineTo(rx+25, ry+15); ctx.stroke();
-                    }
+                    let pct = b.hp / b.maxHP;
+        
+                    ctx.beginPath();
+                    if (pct < 0.8) { ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); }
+                    if (pct < 0.5) { ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+18, ry+22); }
+                    if (pct < 0.3) { ctx.moveTo(rx+5, ry+TILE_SIZE-5); ctx.lineTo(rx+22, ry+12); }
+                    ctx.stroke();
                 }
             }
+        }
+        // --- NEW LINEAR DEPTH DARKNESS ---
+// This creates a gradient that gets darker as you scroll down
+let darknessStart = 5 * TILE_SIZE; // Start getting dark after 5 rows
+let fullDarkness = ROWS * TILE_SIZE; // Max dark at bedrock
+
+let darknessGrad = ctx.createLinearGradient(0, darknessStart - offsetY, 0, fullDarkness - offsetY);
+darknessGrad.addColorStop(0, "rgba(0,0,0,0)");      // Transparent at top
+darknessGrad.addColorStop(1, "rgba(0,0,0,0.85)");   // Deep dark at bottom
+
+ctx.fillStyle = darknessGrad;
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
             if (b.hasLadder) {
                 ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 4;
                 ctx.strokeRect(rx + 8, ry, TILE_SIZE - 16, TILE_SIZE);
@@ -427,6 +434,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
