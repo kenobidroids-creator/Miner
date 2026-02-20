@@ -223,6 +223,20 @@ function move() {
         player.x = nextStep.x;
         player.y = nextStep.y;
 
+        // GRAVITY CHECK: If standing in air with no ladder, fall down
+        // (Unless the next step in the path is already taking us down)
+        if (player.y < ROWS - 1 && world[player.y][player.x].mined && 
+            !world[player.y][player.x].hasLadder && 
+            !world[player.y+1][player.x].mined) {
+            // This is a stable floor, we are good.
+        } else if (player.y < ROWS - 1 && world[player.y][player.x].mined && 
+                   !world[player.y][player.x].hasLadder && 
+                   world[player.y+1][player.x].mined) {
+             // We are in mid-air! Fall 1 tile.
+             player.y++;
+             currentPath = []; // Cancel the old path because we fell
+        }
+
         // Auto-sell at surface
         if (player.y === 0 && player.cargo > 0) {
             let payout = player.cargoValue; // Sell for the actual value collected
@@ -432,6 +446,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
