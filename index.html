@@ -303,6 +303,8 @@ function draw() {
                 }
             }
         }
+    }
+}
         // --- NEW LINEAR DEPTH DARKNESS ---
 // This creates a gradient that gets darker as you scroll down
 let darknessStart = 5 * TILE_SIZE; // Start getting dark after 5 rows
@@ -336,35 +338,6 @@ ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillText(blockedMessage, canvas.width / 2 - ctx.measureText(blockedMessage).width / 2, canvas.height / 2 + 5);
         blockedTimer--;
     }
-    // --- FLASHLIGHT EFFECT ---
-    // The deeper you are, the darker it gets (starts getting dark after row 10)
-    let darknessOpacity = Math.min(0.9, Math.max(0, (player.y - 10) / 80));
-
-    if (darknessOpacity > 0) {
-        ctx.save();
-        // Create the dark overlay
-        ctx.fillStyle = `rgba(0, 0, 0, ${darknessOpacity})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // "Cut out" the flashlight circle
-        ctx.globalCompositeOperation = 'destination-out';
-        let playerCanvasY = (player.y * TILE_SIZE) - offsetY + (TILE_SIZE / 2);
-        let playerCanvasX = (player.x * TILE_SIZE) + (TILE_SIZE / 2);
-
-        let gradient = ctx.createRadialGradient(
-            playerCanvasX, playerCanvasY, TILE_SIZE * 1, // Inner circle
-            playerCanvasX, playerCanvasY, TILE_SIZE * 3  // Outer glow
-        );
-        gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
-        gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(playerCanvasX, playerCanvasY, TILE_SIZE * 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
-
 // --- LISTENERS ---
 canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
@@ -433,6 +406,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
