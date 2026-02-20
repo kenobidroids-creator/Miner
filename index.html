@@ -274,17 +274,24 @@ function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     let offsetY = Math.max(0, (player.y * TILE_SIZE) - canvas.height / 2);
 
+    // 1. Draw World (Blocks and Ladders)
     for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
             let b = world[y][x];
             let rx = x * TILE_SIZE;
             let ry = (y * TILE_SIZE) - offsetY;
+
+            // Performance: don't draw things off-screen
             if (ry < -TILE_SIZE || ry > canvas.height) continue;
 
             if (!b.mined) {
+                // Check if adjacent to air to reveal gems
                 let revealed = false;
-                for(let ty=-1; ty<=1; ty++) for(let tx=-1; tx<=1; tx++)
-                    if(world[y+ty]?.[x+tx]?.mined) revealed = true;
+                for(let ty=-1; ty<=1; ty++) {
+                    for(let tx=-1; tx<=1; tx++) {
+                        if(world[y+ty]?.[x+tx]?.mined) revealed = true;
+                    }
+                }
     
                 ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
                 ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
@@ -301,43 +308,49 @@ function draw() {
                     if (pct < 0.3) { ctx.moveTo(rx+5, ry+TILE_SIZE-5); ctx.lineTo(rx+22, ry+12); }
                     ctx.stroke();
                 }
-            }
-        }
-    }
-}
-        // --- NEW LINEAR DEPTH DARKNESS ---
-// This creates a gradient that gets darker as you scroll down
-let darknessStart = 5 * TILE_SIZE; // Start getting dark after 5 rows
-let fullDarkness = ROWS * TILE_SIZE; // Max dark at bedrock
-
-let darknessGrad = ctx.createLinearGradient(0, darknessStart - offsetY, 0, fullDarkness - offsetY);
-darknessGrad.addColorStop(0, "rgba(0,0,0,0)");      // Transparent at top
-darknessGrad.addColorStop(1, "rgba(0,0,0,0.85)");   // Deep dark at bottom
-
-ctx.fillStyle = darknessGrad;
-ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-            if (b.hasLadder) {
-                ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 4;
+            } else if (b.hasLadder) {
+                // Draw Ladders in mined spaces
+                ctx.strokeStyle = "#f39c12"; 
+                ctx.lineWidth = 4;
                 ctx.strokeRect(rx + 8, ry, TILE_SIZE - 16, TILE_SIZE);
                 for(let i=1; i<4; i++) {
-                    ctx.beginPath(); ctx.moveTo(rx+8, ry+(i*10)); ctx.lineTo(rx+TILE_SIZE-8, ry+(i*10)); ctx.stroke();
+                    ctx.beginPath(); 
+                    ctx.moveTo(rx+8, ry+(i*10)); 
+                    ctx.lineTo(rx+TILE_SIZE-8, ry+(i*10)); 
+                    ctx.stroke();
                 }
             }
         }
     }
-    ctx.fillStyle = '#0000FF'; // Player
+
+    // 2. Draw Player
+    ctx.fillStyle = '#0000FF';
     ctx.fillRect(player.x * TILE_SIZE + 5, (player.y * TILE_SIZE) - offsetY + 5, TILE_SIZE - 10, TILE_SIZE - 10);
-    requestAnimationFrame(draw);
-// Draw Blocked Message Overlay
+
+    // 3. --- NEW LINEAR DEPTH DARKNESS ---
+    let darknessStart = 5 * TILE_SIZE; 
+    let fullDarkness = ROWS * TILE_SIZE;
+    let darknessGrad = ctx.createLinearGradient(0, darknessStart - offsetY, 0, fullDarkness - offsetY);
+    darknessGrad.addColorStop(0, "rgba(0,0,0,0)");
+    darknessGrad.addColorStop(1, "rgba(0,0,0,0.85)");
+
+    ctx.fillStyle = darknessGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 4. Draw Blocked Message Overlay
     if (blockedTimer > 0) {
         ctx.fillStyle = "rgba(255, 0, 0, 0.7)";
         ctx.fillRect(50, canvas.height / 2 - 30, 300, 60);
         ctx.fillStyle = "white";
         ctx.font = "bold 16px sans-serif";
-        ctx.fillText(blockedMessage, canvas.width / 2 - ctx.measureText(blockedMessage).width / 2, canvas.height / 2 + 5);
+        let textWidth = ctx.measureText(blockedMessage).width;
+        ctx.fillText(blockedMessage, canvas.width / 2 - textWidth / 2, canvas.height / 2 + 5);
         blockedTimer--;
     }
+
+    requestAnimationFrame(draw);
+}
+
 // --- LISTENERS ---
 canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
@@ -406,6 +419,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
