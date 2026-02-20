@@ -188,9 +188,18 @@ function findPath(startX, startY, targetX, targetY) {
             let id = `${n.x},${n.y}`;
             if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
                 let canMove = world[n.y][n.x].mined;
-                // Vertical constraint: Need ladder to go up
-                if (n.v && n.y < curr.y && !world[curr.y][curr.x].hasLadder) canMove = false;
-                
+                // NEW JUMP LOGIC:
+                // You can go UP if:
+                // 1. There is a ladder OR
+                // 2. It's only a 1-block jump and the space above is clear
+                if (n.v && n.y < curr.y) {
+                    const hasLadder = world[curr.y][curr.x].hasLadder;
+                    const isOneBlockJump = (curr.y - n.y === 1);
+            
+                    if (!hasLadder && !isOneBlockJump) {
+                        canMove = false; // Too high to jump!
+            }
+        }
                 if (canMove) {
                     visited.add(id);
                     queue.push([...path, n]);
@@ -419,6 +428,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
