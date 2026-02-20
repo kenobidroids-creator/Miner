@@ -178,35 +178,38 @@ function findPath(startX, startY, targetX, targetY) {
         }
 
         let neighbors = [
-            {x: curr.x + 1, y: curr.y, v: false},
-            {x: curr.x - 1, y: curr.y, v: false},
-            {x: curr.x, y: curr.y + 1, v: true},
-            {x: curr.x, y: curr.y - 1, v: true}
-        ];
+    {x: curr.x + 1, y: curr.y, v: false}, // Right
+    {x: curr.x - 1, y: curr.y, v: false}, // Left
+    {x: curr.x, y: curr.y + 1, v: true},  // Down
+    {x: curr.x, y: curr.y - 1, v: true},  // Up (Ladder only)
+    
+    // NEW: Diagonal neighbors for hopping onto ledges
+    {x: curr.x + 1, y: curr.y - 1, diag: true}, 
+    {x: curr.x - 1, y: curr.y - 1, diag: true}
+];
 
-       for (let n of neighbors) {
+for (let n of neighbors) {
     let id = `${n.x},${n.y}`;
     if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
-        let canMove = world[n.y][n.x].mined;
+        let block = world[n.y][n.x];
+        let canMove = block.mined;
 
-        // --- VERTICAL RULES ---
-        if (n.y < curr.y) { // Attempting to go UP
-            let hasLadder = world[curr.y][curr.x].hasLadder;
-            let dist = curr.y - n.y;
-
-            if (dist === 1) { 
-                // STEP UP LOGIC:
-                // You can move up 1 tile if:
-                // 1. You are on a ladder
-                // 2. OR the tile BELOW your destination is solid (a ledge to stand on)
-                let tileBelowTargetIsSolid = (n.y + 1 < ROWS) && !world[n.y + 1][n.x].mined;
-                
-                if (!hasLadder && !tileBelowTargetIsSolid) {
-                    canMove = false; 
-                }
-            } else if (dist > 1) {
-                // More than 1 block ALWAYS requires a ladder at current feet
-                if (!hasLadder) canMove = false;
+        // --- THE JUMP RULES ---
+        if (n.diag) {
+            // Rule: You can move diagonally UP only if:
+            // 1. The destination is air
+            // 2. There is a SOLID block directly under the destination to stand on
+            let hasLedge = (n.y + 1 < ROWS) && !world[n.y + 1][n.x].mined;
+            // 2. Is there a ladder to catch you?
+            let hasLadderToCatch = world[n.y][n.x].hasLadder;
+            
+            if (!hasLedge && !hasLadderToCatch) {
+                canMove = false; 
+            }
+        } else if (n.v && n.y < curr.y) {
+            // Straight UP move (no diagonal) still requires a ladder
+            if (!world[curr.y][curr.x].hasLadder) {
+                canMove = false;
             }
         }
 
@@ -232,11 +235,19 @@ function move() {
 
         // GRAVITY CHECK: If standing in air with no ladder, fall down
         // (Unless the next step in the path is already taking us down)
-        if (player.y < ROWS - 1 && world[player.y][player.x].mined && 
-            !world[player.y][player.x].hasLadder && 
-            !world[player.y+1][player.x].mined) {
-             player.y++;
-             currentPath = []; // Cancel the old path because we fell
+        // SMART GRAVITY:
+        // Only fall if:
+        // 1. You are in air (mined block)
+        // 2. There is no ladder where you are
+        // 3. There is no solid floor below you
+        let inAir = world[player.y][player.x].mined;
+        let onLadder = world[player.y][player.x].hasLadder;
+        let hasFloor = (player.y + 1 < ROWS) && !world[player.y + 1][player.x].mined;
+
+        if (inAir && !onLadder && !hasFloor) {
+            // You are officially falling
+            player.y++;
+            currentPath = []; // Cancel pathing to prevent "air walking"
         }
 
         // Auto-sell at surface
@@ -451,6 +462,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
