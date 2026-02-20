@@ -184,24 +184,26 @@ function findPath(startX, startY, targetX, targetY) {
             {x: curr.x, y: curr.y - 1, v: true}
         ];
 
-        for (let n of neighbors) {
+       for (let n of neighbors) {
     let id = `${n.x},${n.y}`;
     if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
         let canMove = world[n.y][n.x].mined;
 
-        // Vertical Movement Rules
-        if (n.v && n.y < curr.y) { // Attempting to go UP
-            const hasLadder = world[curr.y][curr.x].hasLadder;
-            const isOneBlockJump = (curr.y - n.y === 1);
-            
-            // If no ladder AND it's more than 1 block, you can't go up.
-            if (!hasLadder && !isOneBlockJump) {
+        // Vertical check
+        if (n.y < curr.y) { // Attempting to go UP
+            let dist = curr.y - n.y;
+            let hasLadder = world[curr.y][curr.x].hasLadder;
+
+            // Rule: To go up, you need a ladder OR it must be exactly a 1-block hop
+            if (!hasLadder && dist > 1) {
+                canMove = false;
+            }
+            // Rule: You can't hop UP if there's a ceiling directly above you
+            // (Only applies if you're trying to jump into a space)
+            if (!hasLadder && dist === 1 && !world[n.y][n.x].mined) {
                 canMove = false;
             }
         }
-        
-        // Falling Logic: If you move horizontally into air, you must be able to land
-        // (The BFS naturally handles falling, but this keeps paths realistic)
 
         if (canMove) {
             visited.add(id);
@@ -449,6 +451,7 @@ draw();
 </body>
 
 </html>
+
 
 
 
