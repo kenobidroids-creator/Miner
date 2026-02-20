@@ -44,7 +44,9 @@
     </div>
 
     <div class="stats">
-        Gold: $<span id="goldDisplay">0</span> | Cargo: <span id="cargoDisplay">0</span>/<span id="maxDisplay">10</span>
+        Gold: $<span id="goldDisplay">0</span> | 
+        Cargo: <span id="cargoDisplay">0</span>/<span id="maxDisplay">10</span> | 
+        Depth: <span id="depthDisplay">0</span>
     </div>
     
     <div class="canvas-container">
@@ -56,6 +58,7 @@
         <button class="action" onclick="buyUpgrade('cargo')">Cargo +5 ($100)</button>
         <button class="action" onclick="buyUpgrade('drill')">Drill +1 ($150)</button>
         <button class="action" onclick="buyUpgrade('ladders')">Buy 5 Ladders ($50)</button>
+        <button class="action" onclick="buyUpgrade('light')">Flashlight +1 ($200)</button> </div>
     </div>
 
 <script>
@@ -68,7 +71,7 @@ const ctx = canvas.getContext('2d');
 
 // --- STATE ---
 let player = JSON.parse(localStorage.getItem('miner_ladder_v2')) || {
-    x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, level: 1, drillPower: 1, ladders: 5
+    x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, level: 1, drillPower: 1, ladders: 5, lightRadius: 3 // Added this
 };
 let world = [];
 let currentTool = 'mine';
@@ -266,6 +269,34 @@ function draw() {
         ctx.fillText(blockedMessage, canvas.width / 2 - ctx.measureText(blockedMessage).width / 2, canvas.height / 2 + 5);
         blockedTimer--;
     }
+    // --- FLASHLIGHT EFFECT ---
+    // The deeper you are, the darker it gets (starts getting dark after row 5)
+    let darknessOpacity = Math.min(0.9, Math.max(0, (player.y - 5) / 50));
+
+    if (darknessOpacity > 0) {
+        ctx.save();
+        // Create the dark overlay
+        ctx.fillStyle = `rgba(0, 0, 0, ${darknessOpacity})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // "Cut out" the flashlight circle
+        ctx.globalCompositeOperation = 'destination-out';
+        let playerCanvasY = (player.y * TILE_SIZE) - offsetY + (TILE_SIZE / 2);
+        let playerCanvasX = (player.x * TILE_SIZE) + (TILE_SIZE / 2);
+
+        let gradient = ctx.createRadialGradient(
+            playerCanvasX, playerCanvasY, TILE_SIZE * 1, // Inner circle
+            playerCanvasX, playerCanvasY, TILE_SIZE * 3  // Outer glow
+        );
+        gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+        gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(playerCanvasX, playerCanvasY, TILE_SIZE * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
 }
 
 // --- LISTENERS ---
@@ -289,6 +320,7 @@ function buyUpgrade(t) {
     if (t === 'cargo' && player.gold >= 100) { player.gold -= 100; player.maxCargo += 5; }
     else if (t === 'drill' && player.gold >= 150) { player.gold -= 150; player.drillPower += 1; }
     else if (t === 'ladders' && player.gold >= 50) { player.gold -= 50; player.ladders += 5; }
+    else if (t === 'light' && player.gold >= 200) { player.gold -= 200; player.lightRadius += 1; } // New
     save(); updateUI();
 }
 
@@ -319,6 +351,8 @@ function updateUI() {
     document.getElementById('lvlDisplay').innerText = player.level;
     document.getElementById('maxDisplay').innerText = player.maxCargo;
     document.getElementById('matDisplay').innerText = player.ladders;
+    // Update depth (y coordinate * some multiplier)
+    document.getElementById('depthDisplay').innerText = player.y;
 }
 
 initLevel();
@@ -327,4 +361,5 @@ setInterval(applyGravity, 300);
 draw();
 </script>
 </body>
+
 </html>
