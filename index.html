@@ -289,15 +289,23 @@ function draw() {
                     if(world[y+ty]?.[x+tx]?.mined) revealed = true;
                 ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
                 ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
-                // Draw 3-4 random "crack" lines based on damage
-                if (damagePercent < 0.8) { // First crack
-                    ctx.beginPath(); ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); ctx.stroke();
-                }
-                if (damagePercent < 0.5) { // Second crack
-                    ctx.beginPath(); ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+20, ry+25); ctx.stroke();
-                }
-                if (damagePercent < 0.2) { // Final cracks
-                    ctx.beginPath(); ctx.moveTo(rx+10, ry+TILE_SIZE-5); ctx.lineTo(rx+25, ry+15); ctx.stroke();
+
+                // --- NEW: CRACKING EFFECT ---
+                if (b.hp < b.maxHP) {
+                    let damagePercent = b.hp / b.maxHP;
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+                    ctx.lineWidth = 2;
+                    
+                    // Draw 3-4 random "crack" lines based on damage
+                    if (damagePercent < 0.8) { // First crack
+                        ctx.beginPath(); ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); ctx.stroke();
+                    }
+                    if (damagePercent < 0.5) { // Second crack
+                        ctx.beginPath(); ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+20, ry+25); ctx.stroke();
+                    }
+                    if (damagePercent < 0.2) { // Final cracks
+                        ctx.beginPath(); ctx.moveTo(rx+10, ry+TILE_SIZE-5); ctx.lineTo(rx+25, ry+15); ctx.stroke();
+                    }
                 }
             }
             if (b.hasLadder) {
@@ -419,5 +427,6 @@ draw();
 </body>
 
 </html>
+
 
 
