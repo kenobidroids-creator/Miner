@@ -69,11 +69,18 @@ const ROWS = 60;
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// --- SPRITE ---
+const spriteImg = new Image();
+spriteImg.src = 'miner_spritesheet.png'; // Path to your saved image
+
 // --- STATE ---
 let player = JSON.parse(localStorage.getItem('miner_ladder_v2')) || {
     x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, 
     cargoValue: 0, // Add this to track the $ inside your bag
-    level: 1, drillPower: 1, ladders: 5, lightRadius: 3
+    level: 1, drillPower: 1, ladders: 5, lightRadius: 3,
+    facing: 1,      // 1 for Right, -1 for Left
+    state: 'idle',  // 'idle', 'walk', 'mine', 'climb'
+    frame: 0        // For simple animation cycling
 };
 let world = [];
 let currentTool = 'mine';
@@ -137,11 +144,12 @@ function handleInput(clientX, clientY) {
     const mouseY = (clientY - rect.top) * scaleY;
     
     const offsetY = Math.max(0, (player.y * TILE_SIZE) - canvas.height / 2);
-    const tx = Math.floor(mouseX / TILE_SIZE);
-    const ty = Math.floor((mouseY + offsetY) / TILE_SIZE);
+    let tx = Math.floor(mouseX / TILE_SIZE);
+    let ty = Math.floor((mouseY + offsetY) / TILE_SIZE);
 
     if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return;
 
+    // Ladder Placement Tool
     if (currentTool === 'ladder') {
         if (world[ty][tx].mined && !world[ty][tx].hasLadder && player.ladders > 0) {
             world[ty][tx].hasLadder = true;
@@ -151,15 +159,23 @@ function handleInput(clientX, clientY) {
         return;
     }
 
+    // Mining Logic: Breaks the block if you are already standing next to it
     if (!world[ty][tx].mined) {
         if (Math.abs(tx - player.x) <= 1 && Math.abs(ty - player.y) <= 1) {
-             if (player.cargo < player.maxCargo) { mineBlock(tx, ty); currentPath = []; }
-             else { blockedMessage = "CARGO FULL!"; blockedTimer = 60; }
+             if (player.cargo < player.maxCargo) { 
+                 mineBlock(tx, ty); 
+                 currentPath = []; 
+             } else { 
+                 blockedMessage = "CARGO FULL!"; 
+                 blockedTimer = 60; 
+             }
              return;
         }
     }
 
-    // Generate a real path using BFS
+    // PATHFINDING TRIGGER: 
+    // We now allow pathfinding even if the target is NOT mined (solid dirt).
+    // The findPath function will handle stopping the player right next to it.
     currentPath = findPath(player.x, player.y, tx, ty);
 }
 
@@ -171,41 +187,49 @@ function findPath(startX, startY, targetX, targetY) {
         let path = queue.shift();
         let curr = path[path.length - 1];
 
-        // If we reached the target OR a tile adjacent to the target dirt
+        // Success: Reached target tile or adjacent to the target dirt
         if (curr.x === targetX && curr.y === targetY) return path.slice(1);
         if (!world[targetY][targetX].mined && Math.abs(curr.x - targetX) + Math.abs(curr.y - targetY) === 1) {
             return path.slice(1);
         }
 
+        // Define neighbors with your specific movement priorities
         let neighbors = [
-            {x: curr.x, y: curr.y - 1, v: true, straightUp: true}, // Check UP first
-            {x: curr.x + 1, y: curr.y, v: false}, // Right
-            {x: curr.x - 1, y: curr.y, v: false}, // Left
-            {x: curr.x, y: curr.y + 1, v: true},  // Down
-    
-            // NEW: Diagonal neighbors for hopping onto ledges
-            {x: curr.x + 1, y: curr.y - 1, diag: true}, 
-            {x: curr.x - 1, y: curr.y - 1, diag: true}
+            {x: curr.x, y: curr.y - 1, straightUp: true}, // Check UP first
+            {x: curr.x + 1, y: curr.y},                   // Right
+            {x: curr.x - 1, y: curr.y},                   // Left
+            {x: curr.x, y: curr.y + 1},                   // Down
+            {x: curr.x + 1, y: curr.y - 1, diag: true},   // Diagonal Up-Right
+            {x: curr.x - 1, y: curr.y - 1, diag: true}    // Diagonal Up-Left
         ];
 
-for (let n of neighbors) {
+       for (let n of neighbors) {
     let id = `${n.x},${n.y}`;
     if (n.x >= 0 && n.x < COLS && n.y >= 0 && n.y < ROWS && !visited.has(id)) {
         let block = world[n.y][n.x];
-        let canMove = block.mined;
+        let canMove = block.mined; // Only move through air/mined tiles
 
-        // --- THE JUMP RULES ---
+        const currentTile = world[curr.y][curr.x];
+
         if (n.straightUp) {
-            // Straight up is ALWAYS valid if there is a ladder at current feet
-            // OR if it's a 1-block jump into a mined tile.
-            if (!world[curr.y][curr.x].hasLadder && (curr.y - n.y > 1)) {
+            // Rule: Straight up is only for ladders
+            if (!currentTile.hasLadder && !block.hasLadder) {
                 canMove = false;
             }
         } else if (n.diag) {
-            // Diagonals require a ledge OR a ladder to "catch" the player
+            // --- TIGHTENED JUMP RULES ---
+            // 1. Destination must have ground OR a ladder to land on
             let hasLedge = (n.y + 1 < ROWS) && !world[n.y + 1][n.x].mined;
-            let hasLadderToCatch = block.hasLadder;
-            if (!hasLedge && !hasLadderToCatch) canMove = false;
+            let targetHasLadder = block.hasLadder || ((n.y + 1 < ROWS) && world[n.y + 1][n.x].hasLadder);
+            
+            // 2. NEW: Prevent "Long Jumps" by checking if the source tile is a valid push-off point
+            // The character must be standing on ground or a ladder to jump diagonally
+            let sourceHasFloor = (curr.y + 1 < ROWS) && (!world[curr.y + 1][curr.x].mined || world[curr.y + 1][curr.x].hasLadder);
+            let sourceIsLadder = currentTile.hasLadder;
+
+            if (!canMove || (!hasLedge && !targetHasLadder) || (!sourceHasFloor && !sourceIsLadder)) {
+                canMove = false;
+            }
         }
 
         if (canMove) {
@@ -225,62 +249,36 @@ let blockedTimer = 0;
 function move() {
     if (currentPath.length > 0) {
         let nextStep = currentPath.shift();
+        
+        // Update facing
+        if (nextStep.x > player.x) player.facing = 1;
+        if (nextStep.x < player.x) player.facing = -1;
+
         player.x = nextStep.x;
         player.y = nextStep.y;
 
-        // Before moving, check if we are jumping up to a ladder
-        let targetIsLadder = world[nextStep.y][nextStep.x].hasLadder;
-    
+        // Determine animation state
+        const onLadder = world[player.y][player.x].hasLadder;
+        const ladderBelow = (player.y + 1 < ROWS) && world[player.y + 1][player.x].hasLadder;
+        player.state = onLadder ? 'climb' : 'walk';
 
-        // GRAVITY CHECK: If standing in air with no ladder, fall down
-        // (Unless the next step in the path is already taking us down)
-        // SMART GRAVITY:
-        // Only fall if:
-        // 1. You are in air (mined block)
-        // 2. There is no ladder where you are
-        // 3. There is no solid floor below you
-        // If we landed on a ladder, cancel any falling logic immediately
-        if (targetIsLadder) {
-            // We have "grabbed" the ladder, do not apply gravity
-            save();
-            updateUI();
-            return;
-        }
-
-        // Standard Gravity check
-        let onLadder = world[player.y][player.x].hasLadder;
-        let ladderBelow = (player.y + 1 < ROWS) && world[player.y + 1][player.x].hasLadder;
-        let solidBelow = (player.y + 1 < ROWS) && !world[player.y + 1][player.x].mined;
-
-        // If you aren't on a ladder, and there's no ladder/block below you, you fall
-        if (!onLadder && !ladderBelow && !solidBelow) {
-            if (player.y < ROWS - 1) {
-                player.y++;
-                currentPath = []; // Stop movement because we fell
-            }
-        }
-        // A "floor" is now either a solid block OR a ladder beneath your feet
-        let hasFloor = (player.y + 1 < ROWS) && (!world[player.y + 1][player.x].mined || world[player.y + 1][player.x].hasLadder);
-
-        if (!onLadder && !hasFloor && player.y < ROWS - 1) {
-            player.y++; // Fall
-            currentPath = []; // Stop the confused path
-        }
-
-        // Auto-sell at surface
+        // Check if we are at the surface to sell
         if (player.y === 0 && player.cargo > 0) {
-            let payout = player.cargoValue; // Sell for the actual value collected
+            let payout = player.cargoValue || 0;
             player.gold += payout;
-    
-            // Reset both counters
             player.cargo = 0;
             player.cargoValue = 0;
-
             blockedMessage = `SOLD HAUL FOR $${payout}`;
             blockedTimer = 90;
-            save(); updateUI();
-            currentPath = []; // Stop moving to process the sale
+            currentPath = []; // This is the only time we should auto-clear the path
+            player.state = 'idle';
         }
+        
+        save(); 
+        updateUI();
+    } else {
+        // Only go idle when the path is completely empty
+        if (player.state !== 'mine') player.state = 'idle';
     }
 }
 
@@ -301,34 +299,29 @@ function mineBlock(x, y) {
     let b = world[y][x];
     if (b.type === 'bedrock') { nextLevel(); return; }
 
-    if (player.cargo >= player.maxCargo) {
-        blockedMessage = "CARGO FULL!";
-        blockedTimer = 200;
-        return;
-    }
+    // Face the block being mined
+    if (x > player.x) player.facing = 1;
+    if (x < player.x) player.facing = -1;
 
-    // Apply damage. Use drill power to damage the block
+    player.state = 'mine';
     b.hp -= player.drillPower;
 
-    // If block is still alive, just save the damage state (for the cracks)
-    if (b.hp > 0) {
-        save(); // Save the HP state so cracks persist
-        return; 
+    if (b.hp <= 0) {
+        b.mined = true;
+        player.state = 'idle'; // Reset state when block breaks
+        player.cargo++;
+        player.cargoValue = (player.cargoValue || 0) + (b.type === 'gem' ? 100 : 5);
     }
-
-    // Block Breaks
-    b.mined = true;
-    player.cargo++;
-    player.cargoValue = (player.cargoValue || 0) + (b.type === 'gem' ? 100 : 5);
-    
-    save();
-    updateUI();
+    save(); updateUI();
 }
 
 // --- RENDERING ---
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     let offsetY = Math.max(0, (player.y * TILE_SIZE) - canvas.height / 2);
+
+    // --- FIX: Define onLadder by checking the world at player's current tile ---
+    const onLadder = world[player.y] && world[player.y][player.x] ? world[player.y][player.x].hasLadder : false;
 
     // 1. Draw World (Blocks and Ladders)
     for (let y = 0; y < ROWS; y++) {
@@ -383,9 +376,52 @@ function draw() {
         }
     }
 
-    // 2. Draw Player
-    ctx.fillStyle = '#0000FF';
-    ctx.fillRect(player.x * TILE_SIZE + 5, (player.y * TILE_SIZE) - offsetY + 5, TILE_SIZE - 10, TILE_SIZE - 10);
+   // --- DRAW STATIC GHOST AND DOTTED PATH ---
+    if (currentPath.length > 0) {
+        ctx.save();
+        ctx.setLineDash([5, 5]); 
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        ctx.moveTo(player.x * TILE_SIZE + TILE_SIZE/2, (player.y * TILE_SIZE + TILE_SIZE/2) - offsetY);
+
+        currentPath.forEach((step, index) => {
+            let sx = step.x * TILE_SIZE + TILE_SIZE/2;
+            let sy = (step.y * TILE_SIZE + TILE_SIZE/2) - offsetY;
+            ctx.lineTo(sx, sy);
+
+            // Draw Ghost Sprite at the very last step
+            if (index === currentPath.length - 1) {
+                ctx.globalAlpha = 0.4; 
+
+                // Determine which way the ghost should face based on its arrival
+                let lastStep = currentPath[currentPath.length - 1];
+                let prevStep = currentPath.length > 1 ? currentPath[currentPath.length - 2] : player;
+                let ghostFacing = (lastStep.x >= prevStep.x) ? 1 : -1;
+
+                // Call drawStaticPlayer to keep the ghost from moving/climbing
+                drawStaticPlayer(ctx, step.x * TILE_SIZE, (step.y * TILE_SIZE) - offsetY, ghostFacing, lastStep.y, lastStep.x);
+                
+                ctx.globalAlpha = 1.0;
+            }
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // Draw pixel player
+    if (currentPath.length === 0 && player.state !== 'mine') {
+        player.state = 'idle';
+    }
+
+    let playerRX = player.x * TILE_SIZE;
+    let playerRY = (player.y * TILE_SIZE) - offsetY;
+    drawPlayer(ctx, playerRX, playerRY); // This triggers your sprite logic!
+
+    // 2. Draw Player (square)
+    // ctx.fillStyle = '#0000FF';
+    // ctx.fillRect(player.x * TILE_SIZE + 5, (player.y * TILE_SIZE) - offsetY + 5, TILE_SIZE - 10, TILE_SIZE - 10);
 
     // 3. --- NEW LINEAR DEPTH DARKNESS ---
     let darknessStart = 5 * TILE_SIZE; 
@@ -411,6 +447,107 @@ function draw() {
     requestAnimationFrame(draw);
 }
 
+function drawStaticPlayer(ctx, rx, ry, facing, y, x) {
+    const FRAME_W = 922 / 4; 
+    const FRAME_H = 902 / 3; 
+    
+    // Check surroundings for the ghost's position to pick the right idle pose
+    const onLadder = world[y] && world[y][x] ? world[y][x].hasLadder : false;
+    const ladderBelow = (y + 1 < ROWS) && world[y + 1][x].hasLadder;
+
+    // Ghost is always idle
+    let row = (onLadder || ladderBelow) ? 0 : 1; 
+    let col = 0; 
+
+    ctx.save();
+    ctx.translate(Math.floor(rx + TILE_SIZE / 2), Math.floor(ry + TILE_SIZE));
+    
+    // Only flip if it's the side-facing idle (Row 1)
+    if (row === 1) {
+        ctx.scale(facing, 1);
+    }
+
+    if (spriteImg.complete) {
+        ctx.drawImage(
+            spriteImg,
+            Math.floor(col * FRAME_W), Math.floor(row * FRAME_H), 
+            Math.floor(FRAME_W), Math.floor(FRAME_H),             
+            Math.floor(-TILE_SIZE / 2), 
+            Math.floor(-TILE_SIZE * 1.2), 
+            TILE_SIZE, 
+            Math.floor(TILE_SIZE * 1.2)
+        );
+    }
+    ctx.restore();
+}
+
+function drawPlayer(ctx, rx, ry) {
+    const FRAME_W = 922 / 4; 
+    const FRAME_H = 902 / 3; 
+    
+    let col = 0;
+    let row = 0;
+
+    // 1. Check if the current tile has a ladder
+    const onLadder = world[player.y] && world[player.y][player.x] ? world[player.y][player.x].hasLadder : false;
+
+    // 2. Check if the tile BELOW has a ladder or is solid ground
+    const ladderBelow = (player.y + 1 < ROWS) && world[player.y + 1][player.x].hasLadder;
+    const solidBelow = (player.y + 1 < ROWS) && !world[player.y + 1][player.x].mined;
+
+    // 3. Fall ONLY if there's no ladder here, no ladder below, and no ground below
+    const isFalling = (player.y < ROWS - 1) && !onLadder && !ladderBelow && !solidBelow;
+
+    // --- ANIMATION LOGIC ---
+    if (player.state === 'climb') {
+        row = 2;
+        col = (Math.floor(Date.now() / 200) % 2) + 1; 
+    } 
+    else if (isFalling) {
+        // Falling: Frame 0,3 (Arms up)
+        row = 0;
+        col = 3; 
+    }
+    else if (player.state === 'walk') {
+        row = 1;
+        col = (Math.floor(Date.now() / 150) % 3) + 1; 
+    } 
+    else if (player.state === 'mine') {
+        row = 0; 
+        col = (Math.floor(Date.now() / 100) % 2) + 1;
+    } 
+    else {
+        // IDLE STATES: 
+        // If we are touching a ladder (here or below), show the front idle
+        if (onLadder || ladderBelow) {
+            row = 0; col = 0; // Front-facing "Ladder" Idle
+        } else {
+            row = 1; col = 0; // Side-facing "Ground" Idle
+        }
+    }
+
+    ctx.save();
+    ctx.translate(Math.floor(rx + TILE_SIZE / 2), Math.floor(ry + TILE_SIZE));
+    
+    // Don't flip the front-facing (0,0) or back-facing (2,0) frames
+    if (!(row === 0 && col === 0) && !(row === 2 && col === 0)) {
+        ctx.scale(player.facing || 1, 1);
+    }
+
+    if (spriteImg.complete) {
+        ctx.drawImage(
+            spriteImg,
+            Math.floor(col * FRAME_W), Math.floor(row * FRAME_H), 
+            Math.floor(FRAME_W), Math.floor(FRAME_H),             
+            Math.floor(-TILE_SIZE / 2), 
+            Math.floor(-TILE_SIZE * 1.2), 
+            TILE_SIZE, 
+            Math.floor(TILE_SIZE * 1.2)
+        );
+    }
+    ctx.restore();
+}
+
 // --- LISTENERS ---
 canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
@@ -426,7 +563,6 @@ canvas.addEventListener('touchstart', e => {
         e.preventDefault();
     }
 }, { passive: false });
-
 
 function buyUpgrade(t) {
     if (t === 'cargo' && player.gold >= 100) { player.gold -= 100; player.maxCargo += 5; }
