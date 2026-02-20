@@ -71,7 +71,9 @@ const ctx = canvas.getContext('2d');
 
 // --- STATE ---
 let player = JSON.parse(localStorage.getItem('miner_ladder_v2')) || {
-    x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, level: 1, drillPower: 1, ladders: 5, lightRadius: 3 // Added this
+    x: 5, y: 0, gold: 100, cargo: 0, maxCargo: 10, 
+    cargoValue: 0, // Add this to track the $ inside your bag
+    level: 1, drillPower: 1, ladders: 5, lightRadius: 3
 };
 let world = [];
 let currentTool = 'mine';
@@ -91,11 +93,24 @@ function initLevel() {
         world = JSON.parse(savedWorld);
     } else {
         world = [];
+        // Scale HP based on level: Level 1 = 1x, Level 2 = 2x, etc.
+        let hpMult = player.level; 
+
         for (let y = 0; y < ROWS; y++) {
             world[y] = [];
             for (let x = 0; x < COLS; x++) {
                 let type = (y === 0) ? 'air' : (Math.random() < 0.1 ? 'gem' : (y === ROWS-1 ? 'bedrock' : 'dirt'));
-                world[y][x] = { type, mined: (type === 'air'), hasLadder: false, hp: (type === 'gem' ? 3 : 1) };
+                
+                // Set Max HP and Current HP
+                let maxHP = (type === 'gem' ? 3 : 1) * hpMult;
+                
+                world[y][x] = { 
+                    type, 
+                    mined: (type === 'air'), 
+                    hasLadder: false, 
+                    hp: maxHP,
+                    maxHP: maxHP // We need to store maxHP to calculate the crack percentage
+                };
             }
         }
         save();
@@ -198,8 +213,15 @@ function move() {
 
         // Auto-sell at surface
         if (player.y === 0 && player.cargo > 0) {
-            player.gold += (player.cargo * 10);
+            let payout = player.cargoValue; // Sell for the actual value collected
+            player.gold += payout;
+    
+            // Reset both counters
             player.cargo = 0;
+            player.cargoValue = 0;
+
+            blockedMessage = `SOLD HAUL FOR $${payout}`;
+            blockedTimer = 90;
             save(); updateUI();
             currentPath = []; // Stop moving to process the sale
         }
@@ -222,10 +244,30 @@ function applyGravity() {
 function mineBlock(x, y) {
     let b = world[y][x];
     if (b.type === 'bedrock') { nextLevel(); return; }
+
+    // Use drill power to damage the block
     b.hp -= player.drillPower;
+
+    // If block is still alive, just save the damage state (for the cracks)
+    if (b.hp > 0) {
+        save();
+        return; 
+    }
+
+    // If HP is 0 or less, the block breaks!
     if (b.hp <= 0) {
-        if (b.type === 'gem') player.gold += 100;
-        b.mined = true; player.cargo++; save(); updateUI();
+        b.mined = true;
+        player.cargo++; // Every block takes 1 space
+
+        // Only add value if it's a gem!
+        if (b.type === 'gem') {
+            player.cargoValue += 100; // Gems are worth $100
+        } else {
+            player.cargoValue += 5;   // Dirt is only worth $5
+        }
+        
+        save();
+        updateUI();
     }
 }
 
@@ -247,6 +289,16 @@ function draw() {
                     if(world[y+ty]?.[x+tx]?.mined) revealed = true;
                 ctx.fillStyle = (b.type === 'gem' && revealed) ? '#00FF00' : (b.type === 'bedrock' ? '#111' : '#8B4513');
                 ctx.fillRect(rx, ry, TILE_SIZE - 2, TILE_SIZE - 2);
+                // Draw 3-4 random "crack" lines based on damage
+                if (damagePercent < 0.8) { // First crack
+                    ctx.beginPath(); ctx.moveTo(rx+5, ry+5); ctx.lineTo(rx+15, ry+20); ctx.stroke();
+                }
+                if (damagePercent < 0.5) { // Second crack
+                    ctx.beginPath(); ctx.moveTo(rx+TILE_SIZE-5, ry+5); ctx.lineTo(rx+20, ry+25); ctx.stroke();
+                }
+                if (damagePercent < 0.2) { // Final cracks
+                    ctx.beginPath(); ctx.moveTo(rx+10, ry+TILE_SIZE-5); ctx.lineTo(rx+25, ry+15); ctx.stroke();
+                }
             }
             if (b.hasLadder) {
                 ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 4;
@@ -326,21 +378,25 @@ function buyUpgrade(t) {
 
 function nextLevel() {
     // Calculate final haul value before descending
-    const haulValue = player.cargo * 10;
+    const haulValue = player.cargoValue || 0;
     
     if (confirm(`Found Bedrock! You have $${haulValue} in cargo. Sell and descend to Level ${player.level + 1}?`)) {
-        // Cash out
+        // Cash out/Pay the player
         player.gold += haulValue;
+        // Reset the bag
         player.cargo = 0;
+        player.cargoValue = 0;
         
-        // Advance level
+        // Advance level. Increment and reset position
         player.level++;
         player.y = 0; // Reset player to the surface
         
-        // Wipe old world data and generate new
+        // Wipe old world data and generate new. CRITICAL: Clear the old world so the new HP scaling kicks in
         localStorage.removeItem('miner_world_data');
+        // Re-initialize and Save
         initLevel();
         save();
+        updateUI();
     }
 }
 
@@ -363,4 +419,5 @@ draw();
 </body>
 
 </html>
+
 
