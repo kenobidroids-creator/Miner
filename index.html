@@ -275,8 +275,25 @@ function buyUpgrade(t) {
 }
 
 function nextLevel() {
-    if (confirm("Next Level?")) { player.level++; player.y = 0; localStorage.removeItem('miner_world_data'); initLevel(); save(); }
+    // Calculate final haul value before descending
+    const haulValue = player.cargo * 10;
+    
+    if (confirm(`Found Bedrock! You have $${haulValue} in cargo. Sell and descend to Level ${player.level + 1}?`)) {
+        // Cash out
+        player.gold += haulValue;
+        player.cargo = 0;
+        
+        // Advance level
+        player.level++;
+        player.y = 0; // Reset player to the surface
+        
+        // Wipe old world data and generate new
+        localStorage.removeItem('miner_world_data');
+        initLevel();
+        save();
+    }
 }
+
 
 function updateUI() {
     document.getElementById('goldDisplay').innerText = player.gold;
