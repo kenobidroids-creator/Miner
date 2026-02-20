@@ -122,6 +122,7 @@ function handleInput(clientX, clientY) {
 
     if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return;
 
+    // LADDER TOOL: Place a ladder if tile is mined
     if (currentTool === 'ladder') {
         if (world[ty][tx].mined && !world[ty][tx].hasLadder && player.ladders > 0) {
             world[ty][tx].hasLadder = true;
@@ -131,19 +132,32 @@ function handleInput(clientX, clientY) {
         return;
     }
 
-    // CLICKING DIRT: Mine it if adjacent, then stop.
+    // MINE TOOL logic
     if (!world[ty][tx].mined) {
-        goal = null; 
+        // If we are ALREADY next to it, mine it immediately
         if (Math.abs(tx - player.x) <= 1 && Math.abs(ty - player.y) <= 1) {
-             if (player.cargo < player.maxCargo) mineBlock(tx, ty);
-             else alert("Cargo full!");
+             if (player.cargo < player.maxCargo) {
+                 mineBlock(tx, ty);
+                 goal = null; // Stop moving if we just mined
+             } else {
+                 blockedMessage = "CARGO FULL!";
+                 blockedTimer = 60;
+             }
+        } 
+        // NEW: If we are far away, find the closest empty neighbor to walk to
+        else {
+            goal = {x: tx, y: ty}; 
+            // The pathfinding 'getMoveScore' naturally handles the rest because
+            // it refuses to step ONTO the dirt, so it will stop at the closest valid tile.
+            pathHistory = [];
         }
-    } 
-    // CLICKING OPEN SPACE: Set as pathfinding goal.
-    else {
+    } else {
+        // Clicking an empty space: just navigate there
         goal = {x: tx, y: ty};
+        pathHistory = [];
     }
 }
+
 
 let blockedMessage = "";
 let blockedTimer = 0;
