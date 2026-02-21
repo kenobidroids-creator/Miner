@@ -561,12 +561,12 @@ canvas.addEventListener('touchstart', e => {
     // 3. Process the game input
     handleInput(e.touches[0].clientX, e.touches[0].clientY);
 
-        // Only prevent scroll if we are actually intending to move or build
+    // Only prevent scroll if we are actually intending to move or build
     // If the user just swipes quickly, the browser will now allow a scroll
-    // if (goal || currentTool === 'ladder') {
-      //  e.preventDefault();
-    //}
-    
+    if (goal || currentTool === 'ladder') {
+        e.preventDefault();
+    }
+
 }, { passive: false }); // 'passive: false' is required to allow e.preventDefault()
 
 
