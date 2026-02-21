@@ -6,7 +6,7 @@
     <style>
         canvas { 
             background: #000; display: block; margin: 0 auto; border: 4px solid #444; 
-            cursor: crosshair; max-width: 100%; height: auto; -webkit-touch-callout: none; -webkit-user-select: none;
+            cursor: crosshair; max-width: 100%; height: auto; -webkit-touch-callout: none; -webkit-user-select: none; touch-action: pan-y;
         }
         body { 
             background: #111; color: white; font-family: sans-serif; text-align: center; 
@@ -87,6 +87,9 @@ let world = [];
 let currentTool = 'mine';
 let target = null;
 let currentPath = []; // Stores the actual list of steps to take
+let touchStartX = 0;
+let touchStartY = 0;
+const SCROLL_THRESHOLD = 10; // Pixels moved before it counts as a scroll
 
 
 // --- PERSISTENCE ---
@@ -552,22 +555,30 @@ function drawPlayer(ctx, rx, ry) {
 // --- LISTENERS ---
 canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
-    // 1. Allow natural zooming/scrolling only if using two or more fingers
-    if (e.touches.length > 1) return;
+    // Record where the touch began
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+}, { passive: true }); // Passive: true allows the browser to scroll immediately
 
-    // 2. Stop the browser from scrolling the whole page while you are playing
-    e.preventDefault();
+canvas.addEventListener('touchend', e => {
+    // Get where the touch ended
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
 
-    // 3. Process the game input
-    handleInput(e.touches[0].clientX, e.touches[0].clientY);
+    // Calculate distance moved
+    const dx = Math.abs(touchEndX - touchStartX);
+    const dy = Math.abs(touchEndY - touchStartY);
 
-    // Only prevent scroll if we are actually intending to move or build
-    // If the user just swipes quickly, the browser will now allow a scroll
-    if (goal || currentTool === 'ladder') {
-        e.preventDefault();
-    }
-
-}, { passive: false }); // 'passive: false' is required to allow e.preventDefault()
+    // If the movement is less than our threshold, it's a CLICK
+    if (dx < SCROLL_THRESHOLD && dy < SCROLL_THRESHOLD) {
+        // Stop the browser from doing anything else (like zooming)
+        if (e.cancelable) e.preventDefault();
+        
+        // Run your game input logic
+        handleInput(touchEndX, touchEndY);
+    } 
+    // Otherwise, we do nothing and let the browser continue the scroll
+}, { passive: false });
 
 
 
