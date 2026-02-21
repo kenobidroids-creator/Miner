@@ -39,8 +39,9 @@
     <h1>Deep Miner: Level <span id="lvlDisplay">1</span></h1>
     
     <div class="toolbar">
-        <button id="mineTool" class="tool-btn active-tool" onclick="setTool('mine')">⛏️ MINE / CLIMB</button>
-        <button id="ladderTool" class="tool-btn" onclick="setTool('ladder')">🪜 LADDER (<span id="matDisplay">5</span>)</button>
+    <button id="mineTool" class="tool-btn active-tool" onclick="setTool('mine')">⛏️ MINE / CLIMB</button>
+    <button id="ladderTool" class="tool-btn" onclick="setTool('ladder')">🪜 PLACE LADDER (<span id="matDisplay">5</span>)</button>
+    <button id="cargoTool" class="tool-btn" onclick="setTool('cargo')">📦 CARGO / DROP</button>
     </div>
 
     <div class="stats">
@@ -61,6 +62,29 @@
         <button class="action" onclick="buyUpgrade('light')">Flashlight +1 ($200)</button> </div>
         <button onclick="localStorage.clear(); location.reload();" style="background:red; color:white;">HARD RESET GAME</button>
     </div>
+
+    <div id="dropModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1000; justify-content:center; align-items:center;">
+    <div style="background:#222; padding:20px; border:4px solid #444; border-radius:8px; text-align:center; width:280px; font-family:sans-serif;">
+        <h3 style="margin-top:0; color:#f1c40f;">DROP CARGO</h3>
+        <div id="dropInputsContainer" style="margin-bottom:15px; text-align:left;">
+            </div>
+        <div style="display:flex; gap:10px; justify-content:center;">
+            <button class="action" onclick="confirmDrop()">DROP ALL SELECTED</button>
+            <button class="action" style="background:#c0392b;" onclick="closeDropModal()">CANCEL</button>
+        </div>
+    </div>
+</div>
+
+<div id="saleModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:1100; justify-content:center; align-items:center;">
+    <div style="background:#222; padding:20px; border:4px solid #f1c40f; border-radius:8px; text-align:center; width:280px; font-family:'Courier New', monospace;">
+        <h2 style="color:#f1c40f; margin-top:0;">HAUL SOLD!</h2>
+        <div id="saleBreakdown" style="text-align:left; margin:15px 0; line-height:1.6;">
+            </div>
+        <hr style="border:1px solid #444;">
+        <h3 style="margin-bottom:20px;">TOTAL: <span id="totalSaleVal" style="color:#2ecc71;">$0</span></h3>
+        <button class="action" onclick="closeSaleModal()" style="width:100%;">CONTINUE</button>
+    </div>
+</div>
 
 <script>
 // --- CONFIG ---
@@ -90,7 +114,10 @@ let player = JSON.parse(localStorage.getItem('miner_ladder_v2')) || {
     level: 1, drillPower: 1, ladders: 5, lightRadius: 3,
     facing: 1,      // 1 for Right, -1 for Left
     state: 'idle',  // 'idle', 'walk', 'mine', 'climb'
-    frame: 0        // For simple animation cycling
+    frame: 0,        // For simple animation cycling
+    goldCount: 0,
+    gemCount: 0,
+    dirtCount: 0
 };
 let world = [];
 let currentTool = 'mine';
@@ -159,6 +186,7 @@ function setTool(tool) {
     currentTool = tool;
     document.getElementById('mineTool').className = 'tool-btn' + (tool === 'mine' ? ' active-tool' : '');
     document.getElementById('ladderTool').className = 'tool-btn' + (tool === 'ladder' ? ' active-tool' : '');
+    document.getElementById('cargoTool').className = 'tool-btn' + (tool === 'cargo' ? ' active-tool' : '');
 }
 
 // --- NEW STATE FOR PATHFINDING ---
@@ -198,6 +226,45 @@ function handleInput(clientX, clientY) {
         }
         return; // Stop here so we don't try to move/mine while placing ladders
     }
+
+   // --- CARGO TOOL: DROP OR PICK UP CRATE ---
+if (currentTool === 'cargo') {
+    const targetTile = world[ty][tx];
+    
+    // DROP: Click your own tile to trigger the modal
+    if (tx === player.x && ty === player.y && player.cargo > 0) {
+        if (!targetTile.hasCrate) {
+            openDropModal(); // Open the new window
+        }
+        return;
+    }
+
+    // PICK UP: Click a tile with a crate to put its contents back in bag
+    if (targetTile.hasCrate && player.cargo < player.maxCargo) {
+    let space = player.maxCargo - player.cargo;
+    let contents = targetTile.crateContents || { dirt: targetTile.crateAmount, gold: 0, gem: 0 };
+    
+    // Take Gems first (highest value), then Gold, then Dirt
+    ['gem', 'gold', 'dirt'].forEach(type => {
+        let countKey = type + 'Count';
+        let val = (type === 'gem' ? 100 : (type === 'gold' ? 25 : 5));
+        
+        let toTake = Math.min(contents[type] || 0, space);
+        if (toTake > 0) {
+            contents[type] -= toTake;
+            player[countKey] = (player[countKey] || 0) + toTake;
+            player.cargo += toTake;
+            player.cargoValue += (toTake * val);
+            space -= toTake;
+            targetTile.crateAmount -= toTake;
+        }
+    });
+
+    if (targetTile.crateAmount <= 0) targetTile.hasCrate = false;
+    save(); updateUI();
+    return;
+}
+}
 
     // --- MINING & MOVEMENT (UNTOUCHED) ---
     if (!world[ty][tx].mined) {
@@ -297,25 +364,38 @@ function move() {
 
         // Determine animation state
         const onLadder = world[player.y][player.x].hasLadder;
-        const ladderBelow = (player.y + 1 < ROWS) && world[player.y + 1][player.x].hasLadder;
         player.state = onLadder ? 'climb' : 'walk';
 
-        // Check if we are at the surface to sell
+        // --- FIXED AUTO-SELL LOGIC ---
         if (player.y === 0 && player.cargo > 0) {
             let payout = player.cargoValue || 0;
+            
+            // Prepare the breakdown text
+            let breakdown = `
+                🟫 Dirt x${player.dirtCount || 0}: $${(player.dirtCount || 0) * 5}<br>
+                🟡 Gold x${player.goldCount || 0}: $${(player.goldCount || 0) * 25}<br>
+                💎 Gems x${player.gemCount || 0}: $${(player.gemCount || 0) * 100}
+            `;
+            
+            document.getElementById('saleBreakdown').innerHTML = breakdown;
+            document.getElementById('totalSaleVal').innerText = `$${payout}`;
+            document.getElementById('saleModal').style.display = 'flex';
+
             player.gold += payout;
+            
+            // Reset everything
             player.cargo = 0;
             player.cargoValue = 0;
-            blockedMessage = `SOLD HAUL FOR $${payout}`;
-            blockedTimer = 90;
-            currentPath = []; // This is the only time we should auto-clear the path
+            player.dirtCount = 0;
+            player.goldCount = 0;
+            player.gemCount = 0;
+            
+            currentPath = []; 
             player.state = 'idle';
+            save(); 
+            updateUI();
         }
-        
-        save(); 
-        updateUI();
     } else {
-        // Only go idle when the path is completely empty
         if (player.state !== 'mine') player.state = 'idle';
     }
 }
@@ -337,7 +417,6 @@ function mineBlock(x, y) {
     let b = world[y][x];
     if (b.type === 'bedrock') { nextLevel(); return; }
 
-    // Face the block being mined
     if (x > player.x) player.facing = 1;
     if (x < player.x) player.facing = -1;
 
@@ -346,11 +425,86 @@ function mineBlock(x, y) {
 
     if (b.hp <= 0) {
         b.mined = true;
-        player.state = 'idle'; // Reset state when block breaks
+        player.state = 'idle';
         player.cargo++;
-        player.cargoValue = (player.cargoValue || 0) + (b.type === 'gem' ? 100 : 5);
+        
+        if (b.type === 'gem') {
+            player.gemCount = (player.gemCount || 0) + 1;
+            player.cargoValue += 100;
+        } else if (b.type === 'gold') {
+            player.goldCount = (player.goldCount || 0) + 1;
+            player.cargoValue += 25;
+        } else {
+            player.dirtCount = (player.dirtCount || 0) + 1;
+            player.cargoValue += 5;
+        }
     }
     save(); updateUI();
+}
+
+function openDropModal() {
+    const container = document.getElementById('dropInputsContainer');
+    container.innerHTML = ''; // Clear old inputs
+
+    const items = [
+        { id: 'dropDirt', label: '🟫 Dirt', count: player.dirtCount || 0 },
+        { id: 'dropGold', label: '🟡 Gold', count: player.goldCount || 0 },
+        { id: 'dropGem', label: '💎 Gem', count: player.gemCount || 0 }
+    ];
+
+    items.forEach(item => {
+        if (item.count > 0) {
+            const div = document.createElement('div');
+            div.style.marginBottom = "10px";
+            div.innerHTML = `
+                <label style="display:block; font-size:0.9rem;">${item.label} (Max: ${item.count})</label>
+                <input type="number" id="${item.id}" value="0" min="0" max="${item.count}" 
+                style="width:100%; box-sizing:border-box; padding:8px; background:#333; color:white; border:1px solid #555;">
+            `;
+            container.appendChild(div);
+        }
+    });
+
+    document.getElementById('dropModal').style.display = 'flex';
+}
+
+function closeDropModal() {
+    document.getElementById('dropModal').style.display = 'none';
+}
+
+function confirmDrop() {
+    const dAmount = parseInt(document.getElementById('dropDirt')?.value || 0);
+    const gAmount = parseInt(document.getElementById('dropGold')?.value || 0);
+    const mAmount = parseInt(document.getElementById('dropGem')?.value || 0);
+    
+    const totalToDrop = dAmount + gAmount + mAmount;
+    if (totalToDrop <= 0) { closeDropModal(); return; }
+
+    const tile = world[player.y][player.x];
+    tile.hasCrate = true;
+    
+    // Initialize crate contents if empty
+    if (!tile.crateContents) tile.crateContents = { dirt: 0, gold: 0, gem: 0 };
+    
+    // Add items to crate
+    tile.crateContents.dirt += dAmount;
+    tile.crateContents.gold += gAmount;
+    tile.crateContents.gem += mAmount;
+    tile.crateAmount = (tile.crateAmount || 0) + totalToDrop;
+
+    // Remove from player
+    player.cargo -= totalToDrop;
+    player.dirtCount -= dAmount;
+    player.goldCount -= gAmount;
+    player.gemCount -= mAmount;
+    player.cargoValue -= (dAmount * 5 + gAmount * 25 + mAmount * 100);
+
+    closeDropModal();
+    save(); updateUI();
+}
+
+function closeSaleModal() {
+    document.getElementById('saleModal').style.display = 'none';
 }
 
 // --- RENDERING ---
@@ -453,6 +607,20 @@ for (let y = 0; y < ROWS; y++) {
                     ctx.strokeRect(rx + 8, ry, TILE_SIZE - 16, TILE_SIZE);
                 }
             }
+
+            // Draw Dirt Crates
+if (b.hasCrate) {
+    ctx.fillStyle = "#5d4037";
+    ctx.strokeStyle = "#3e2723";
+    ctx.lineWidth = 2;
+    ctx.fillRect(rx + 10, ry + 15, TILE_SIZE - 20, TILE_SIZE - 20);
+    ctx.strokeRect(rx + 10, ry + 15, TILE_SIZE - 20, TILE_SIZE - 20);
+    
+    // Draw amount label
+    ctx.fillStyle = "white";
+    ctx.font = "bold 10px sans-serif";
+    ctx.fillText(b.crateAmount, rx + 15, ry + 30);
+}
         }
     }
 }
@@ -765,7 +933,6 @@ function nextLevel() {
         updateUI();
     }
 }
-
 
 function updateUI() {
     document.getElementById('goldDisplay').innerText = player.gold;
