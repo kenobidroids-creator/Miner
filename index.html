@@ -239,29 +239,39 @@ if (currentTool === 'cargo') {
         return;
     }
 
-    // PICK UP: Click a tile with a crate to put its contents back in bag
-    if (targetTile.hasCrate && player.cargo < player.maxCargo) {
-    let space = player.maxCargo - player.cargo;
-    let contents = targetTile.crateContents || { dirt: targetTile.crateAmount, gold: 0, gem: 0 };
-    
-    // Take Gems first (highest value), then Gold, then Dirt
-    ['gem', 'gold', 'dirt'].forEach(type => {
-        let countKey = type + 'Count';
-        let val = (type === 'gem' ? 100 : (type === 'gold' ? 25 : 5));
-        
-        let toTake = Math.min(contents[type] || 0, space);
-        if (toTake > 0) {
-            contents[type] -= toTake;
-            player[countKey] = (player[countKey] || 0) + toTake;
-            player.cargo += toTake;
-            player.cargoValue += (toTake * val);
-            space -= toTake;
-            targetTile.crateAmount -= toTake;
-        }
-    });
+    // PICK UP: Only allow if clicking a tile with a crate AND player is nearby
+if (targetTile.hasCrate && player.cargo < player.maxCargo) {
+    // Distance Check: Is the player within 1 tile of the crate?
+    const distX = Math.abs(tx - player.x);
+    const distY = Math.abs(ty - player.y);
 
-    if (targetTile.crateAmount <= 0) targetTile.hasCrate = false;
-    save(); updateUI();
+    if (distX <= 1 && distY <= 1) {
+        let space = player.maxCargo - player.cargo;
+        let contents = targetTile.crateContents || { dirt: targetTile.crateAmount, gold: 0, gem: 0 };
+        
+        // Take items in order of value
+        ['gem', 'gold', 'dirt'].forEach(type => {
+            let countKey = type + 'Count';
+            let val = (type === 'gem' ? 100 : (type === 'gold' ? 25 : 5));
+            let toTake = Math.min(contents[type] || 0, space);
+            
+            if (toTake > 0) {
+                contents[type] -= toTake;
+                player[countKey] = (player[countKey] || 0) + toTake;
+                player.cargo += toTake;
+                player.cargoValue += (toTake * val);
+                space -= toTake;
+                targetTile.crateAmount -= toTake;
+            }
+        });
+
+        if (targetTile.crateAmount <= 0) targetTile.hasCrate = false;
+        save(); 
+        updateUI();
+    } else {
+        // Optional: If too far, set a path to walk TO the crate instead
+        currentPath = findPath(player.x, player.y, tx, ty);
+    }
     return;
 }
 }
