@@ -178,17 +178,28 @@ function handleInput(clientX, clientY) {
 
     if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return;
 
-    // Ladder Placement Tool
+    // --- LADDER TOOL: PLACE OR DISMANTLE ---
     if (currentTool === 'ladder') {
-        if (world[ty][tx].mined && !world[ty][tx].hasLadder && player.ladders > 0) {
-            world[ty][tx].hasLadder = true;
+        const targetTile = world[ty][tx];
+        
+        // DISMANTLE: If there is a ladder, pick it back up
+        if (targetTile.hasLadder) {
+            targetTile.hasLadder = false;
+            player.ladders++; // Return the item to inventory
+            save(); 
+            updateUI();
+        } 
+        // PLACE: If it's empty space and you have ladders, place one
+        else if (targetTile.mined && player.ladders > 0) {
+            targetTile.hasLadder = true;
             player.ladders--;
-            save(); updateUI();
+            save(); 
+            updateUI();
         }
-        return;
+        return; // Stop here so we don't try to move/mine while placing ladders
     }
 
-    // Mining Logic: Breaks the block if you are already standing next to it
+    // --- MINING & MOVEMENT (UNTOUCHED) ---
     if (!world[ty][tx].mined) {
         if (Math.abs(tx - player.x) <= 1 && Math.abs(ty - player.y) <= 1) {
              if (player.cargo < player.maxCargo) { 
@@ -202,9 +213,7 @@ function handleInput(clientX, clientY) {
         }
     }
 
-    // PATHFINDING TRIGGER: 
-    // We now allow pathfinding even if the target is NOT mined (solid dirt).
-    // The findPath function will handle stopping the player right next to it.
+    // Pathfinding trigger for movement
     currentPath = findPath(player.x, player.y, tx, ty);
 }
 
