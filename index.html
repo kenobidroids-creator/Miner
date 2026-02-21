@@ -59,6 +59,7 @@
         <button class="action" onclick="buyUpgrade('drill')">Drill +1 ($150)</button>
         <button class="action" onclick="buyUpgrade('ladders')">Buy 5 Ladders ($50)</button>
         <button class="action" onclick="buyUpgrade('light')">Flashlight +1 ($200)</button> </div>
+        <button onclick="localStorage.clear(); location.reload();" style="background:red; color:white;">HARD RESET GAME</button>
     </div>
 
 <script>
@@ -551,18 +552,24 @@ function drawPlayer(ctx, rx, ry) {
 // --- LISTENERS ---
 canvas.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
-    // If the user uses two fingers, let them zoom/scroll naturally
+    // 1. Allow natural zooming/scrolling only if using two or more fingers
     if (e.touches.length > 1) return;
 
-    // Process the game input
+    // 2. Stop the browser from scrolling the whole page while you are playing
+    e.preventDefault();
+
+    // 3. Process the game input
     handleInput(e.touches[0].clientX, e.touches[0].clientY);
 
-    // Only prevent scroll if we are actually intending to move or build
+        // Only prevent scroll if we are actually intending to move or build
     // If the user just swipes quickly, the browser will now allow a scroll
-    if (goal || currentTool === 'ladder') {
-        e.preventDefault();
-    }
-}, { passive: false });
+    // if (goal || currentTool === 'ladder') {
+      //  e.preventDefault();
+    //}
+    
+}, { passive: false }); // 'passive: false' is required to allow e.preventDefault()
+
+
 
 function buyUpgrade(t) {
     if (t === 'cargo' && player.gold >= 100) { player.gold -= 100; player.maxCargo += 5; }
